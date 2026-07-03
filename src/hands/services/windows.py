@@ -109,7 +109,8 @@ class WindowService:
         if title_match is not None:
             needle = title_match.lower()
             scored = sorted(
-                ((_title_ratio(needle, w.title.lower()), w)
+                ((difflib.SequenceMatcher(
+                    None, needle, w.title.lower()).ratio(), w)
                  for w in candidates),
                 key=lambda t: -t[0])
             candidates = [w for r, w in scored

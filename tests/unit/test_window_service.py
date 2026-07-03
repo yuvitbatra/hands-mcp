@@ -53,6 +53,22 @@ async def test_stale_ref_reresolves_by_fuzzy_title(fake_driver, service):
     assert win.title == "Notes.txt — Edited" and win.focused
 
 
+async def test_stale_ref_rejects_dissimilar_title(fake_driver, service):
+    a, _ = _seed(fake_driver)
+    # Service must have seen the window once to snapshot it.
+    await service.list()
+    # Simulate the window being replaced: same pid, but a genuinely
+    # different title (not a suffix/prefix variant) -> fuzzy match must
+    # fail and the stale ref must not silently resolve to the wrong window.
+    fake_driver.window_perform(a, "close", None)
+    fake_driver.add_window("TextEdit", "com.apple.TextEdit", 42,
+                           "Untitled Preferences Panel",
+                           Region(0, 0, 800, 600))
+    with pytest.raises(TargetNotFoundError) as ei:
+        await service.focus(window_ref=a)
+    assert ei.value.details["candidates"]
+
+
 async def test_unresolvable_ref_lists_candidates(fake_driver, service):
     _seed(fake_driver)
     await service.list()
