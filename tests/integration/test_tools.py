@@ -17,6 +17,7 @@ from hands.services.ocr import OCRService
 from hands.services.screenshot import ScreenshotService
 from hands.services.verification import VerificationEngine
 from hands.services.waiter import Waiter
+from hands.services.windows import WindowService
 from hands.state import StateManager
 from hands.tools import register_builtin_tools
 
@@ -25,7 +26,8 @@ pytestmark = pytest.mark.anyio
 EXPECTED_TOOLS = {"screenshot", "get_state", "wait", "mouse_move",
                   "mouse_click", "mouse_drag", "mouse_scroll",
                   "keyboard_type", "key_press", "find_text", "verify",
-                  "clipboard_get", "clipboard_set", "clipboard_paste"}
+                  "clipboard_get", "clipboard_set", "clipboard_paste",
+                  "window_list", "window_focus", "window_manage"}
 
 
 @pytest.fixture
@@ -45,6 +47,7 @@ def wired(fake_driver, tmp_path):
         mouse=MouseService(fake_driver, coords, state, cfg),
         keyboard=keyboard,
         clipboard=ClipboardService(fake_driver, keyboard, cfg),
+        windows=WindowService(fake_driver),
         screenshots=shots, ocr=ocr,
         waiter=Waiter(shots, ocr, cfg),
         verification=VerificationEngine(shots, ocr, fake_driver, cfg))

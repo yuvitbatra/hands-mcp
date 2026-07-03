@@ -46,9 +46,12 @@ class Dispatcher:
             spec = self._registry.get(tool_name)                 # phase 1
             args = self._validate(spec, raw_args)
             self._preflight(args)                                # phase 2
+            policy_class = spec.policy_class
+            if spec.escalate is not None and spec.escalate(args):
+                policy_class = "sensitive"
             self._permissions.authorize(ActionDescriptor(        # phase 3
                 tool=spec.name,
-                policy_class=spec.policy_class)).raise_if_denied()
+                policy_class=policy_class)).raise_if_denied()
 
             async def call() -> dict[str, Any]:
                 return await spec.handler(args, ctx)

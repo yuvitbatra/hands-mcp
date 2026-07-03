@@ -23,6 +23,7 @@ class ToolSpec:
     policy_class: PolicyClass = "act"
     retry: RetryPolicy = field(default_factory=RetryPolicy.pre_side_effect)
     idempotent: bool = False
+    escalate: Callable[[BaseModel], bool] | None = None
 
 
 class ToolRegistry:

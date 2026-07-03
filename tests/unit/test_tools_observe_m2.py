@@ -11,6 +11,7 @@ from hands.services.ocr import OCRService
 from hands.services.screenshot import ScreenshotService
 from hands.services.verification import VerificationEngine
 from hands.services.waiter import Waiter
+from hands.services.windows import WindowService
 from hands.state import StateManager
 from hands.tools import register_builtin_tools
 
@@ -30,7 +31,8 @@ def env():
                                 waiter=Waiter(shots, ocr, cfg),
                                 verification=VerificationEngine(
                                     shots, ocr, driver, cfg),
-                                mouse=None, keyboard=None, clipboard=None)
+                                mouse=None, keyboard=None, clipboard=None,
+                                windows=WindowService(driver))
     reg = ToolRegistry()
     register_builtin_tools(reg, container)
     return SimpleNamespace(driver=driver, registry=reg)

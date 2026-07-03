@@ -7,7 +7,7 @@ from hands.config import HandsConfig
 from hands.dispatcher import Dispatcher
 from hands.errors import DriverError
 from hands.metrics import Metrics
-from hands.permissions import AllowAllPermissions, Denied
+from hands.permissions import Allowed, AllowAllPermissions, Denied
 from hands.registry import ToolRegistry, ToolSpec
 from hands.retry import RetryPolicy
 from hands.state import StateManager
@@ -140,3 +140,29 @@ async def test_audit_line_written(tmp_path):
     await disp.dispatch("t", {})
     lines = cfg.security.audit_path.read_text().strip().splitlines()
     assert len(lines) == 1 and '"t"' in lines[0]
+
+
+async def test_escalate_marks_call_sensitive(tmp_path):
+    """ToolSpec.escalate upgrades policy_class for matching args (M3)."""
+
+    seen: list = []
+
+    class Recorder:
+        def authorize(self, action):
+            seen.append(action.policy_class)
+            return Allowed()
+
+    class Args(BaseModel, extra="forbid"):
+        force: bool = False
+
+    async def handler(args, ctx):
+        return {}
+
+    demo_spec = ToolSpec(
+        name="demo_close", description="d", args_model=Args,
+        handler=handler, policy_class="act", retry=RetryPolicy.none(),
+        idempotent=False, escalate=lambda a: a.force)
+    disp, _, _ = make(tmp_path, [demo_spec], permissions=Recorder())
+    await disp.dispatch("demo_close", {"force": False})
+    await disp.dispatch("demo_close", {"force": True})
+    assert seen == ["act", "sensitive"]

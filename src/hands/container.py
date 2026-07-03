@@ -18,6 +18,7 @@ from .services.ocr import OCRService
 from .services.screenshot import ScreenshotService
 from .services.verification import VerificationEngine
 from .services.waiter import Waiter
+from .services.windows import WindowService
 from .state import StateManager
 from .tools import register_builtin_tools
 
@@ -51,6 +52,7 @@ class Container:
         self.keyboard = KeyboardService(self.driver, config)
         self.clipboard = ClipboardService(self.driver, self.keyboard,
                                           config)
+        self.windows = WindowService(self.driver)
         self.audit = AuditLogger(config)
         self.metrics = Metrics()
         self.permissions = AllowAllPermissions()
