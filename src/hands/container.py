@@ -10,6 +10,7 @@ from .driver.base import Driver
 from .metrics import Metrics
 from .permissions import AllowAllPermissions
 from .registry import ToolRegistry
+from .services.apps import AppService
 from .services.clipboard import ClipboardService
 from .services.coords import CoordinateMapper
 from .services.keyboard import KeyboardService
@@ -53,6 +54,7 @@ class Container:
         self.clipboard = ClipboardService(self.driver, self.keyboard,
                                           config)
         self.windows = WindowService(self.driver)
+        self.apps = AppService(self.driver, self.waiter)
         self.audit = AuditLogger(config)
         self.metrics = Metrics()
         self.permissions = AllowAllPermissions()

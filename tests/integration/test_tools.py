@@ -9,6 +9,7 @@ from hands.dispatcher import Dispatcher
 from hands.metrics import Metrics
 from hands.permissions import AllowAllPermissions
 from hands.registry import ToolRegistry
+from hands.services.apps import AppService
 from hands.services.clipboard import ClipboardService
 from hands.services.coords import CoordinateMapper
 from hands.services.keyboard import KeyboardService
@@ -27,7 +28,8 @@ EXPECTED_TOOLS = {"screenshot", "get_state", "wait", "mouse_move",
                   "mouse_click", "mouse_drag", "mouse_scroll",
                   "keyboard_type", "key_press", "find_text", "verify",
                   "clipboard_get", "clipboard_set", "clipboard_paste",
-                  "window_list", "window_focus", "window_manage"}
+                  "window_list", "window_focus", "window_manage",
+                  "app_open", "app_close", "app_list"}
 
 
 @pytest.fixture
@@ -42,14 +44,16 @@ def wired(fake_driver, tmp_path):
     shots = ScreenshotService(fake_driver, state, cfg)
     ocr = OCRService(fake_driver, coords, cfg)
     keyboard = KeyboardService(fake_driver, cfg)
+    waiter = Waiter(shots, ocr, cfg)
     container = SimpleNamespace(
         config=cfg, driver=fake_driver, state=state,
         mouse=MouseService(fake_driver, coords, state, cfg),
         keyboard=keyboard,
         clipboard=ClipboardService(fake_driver, keyboard, cfg),
         windows=WindowService(fake_driver),
+        apps=AppService(fake_driver, waiter),
         screenshots=shots, ocr=ocr,
-        waiter=Waiter(shots, ocr, cfg),
+        waiter=waiter,
         verification=VerificationEngine(shots, ocr, fake_driver, cfg))
     reg = ToolRegistry()
     register_builtin_tools(reg, container)

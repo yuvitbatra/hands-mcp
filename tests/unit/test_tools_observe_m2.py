@@ -6,6 +6,7 @@ from hands.config import HandsConfig
 from hands.driver.base import RawTextBox
 from hands.driver.fake import FakeDriver
 from hands.registry import ToolRegistry
+from hands.services.apps import AppService
 from hands.services.coords import CoordinateMapper
 from hands.services.ocr import OCRService
 from hands.services.screenshot import ScreenshotService
@@ -26,13 +27,15 @@ def env():
     coords = CoordinateMapper(driver.displays())
     shots = ScreenshotService(driver, state, cfg)
     ocr = OCRService(driver, coords, cfg)
+    waiter = Waiter(shots, ocr, cfg)
     container = SimpleNamespace(config=cfg, driver=driver, state=state,
                                 coords=coords, screenshots=shots, ocr=ocr,
-                                waiter=Waiter(shots, ocr, cfg),
+                                waiter=waiter,
                                 verification=VerificationEngine(
                                     shots, ocr, driver, cfg),
                                 mouse=None, keyboard=None, clipboard=None,
-                                windows=WindowService(driver))
+                                windows=WindowService(driver),
+                                apps=AppService(driver, waiter))
     reg = ToolRegistry()
     register_builtin_tools(reg, container)
     return SimpleNamespace(driver=driver, registry=reg)

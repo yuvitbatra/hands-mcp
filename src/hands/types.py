@@ -148,3 +148,11 @@ class WindowInfo:
     bounds: Region
     focused: bool
     minimized: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AppInfo:
+    bundle_id: str | None
+    name: str
+    pid: int
+    frontmost: bool

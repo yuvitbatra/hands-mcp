@@ -3,8 +3,8 @@ import pytest
 from hands.driver.base import MouseEventSpec, RawTextBox
 from hands.driver.fake import FakeDriver
 from hands.errors import DriverError, TargetNotFoundError
-from hands.types import (ClipboardContent, ModifierFlags, MouseButton, Point,
-                        Region, WindowInfo)
+from hands.types import (AppInfo, ClipboardContent, ModifierFlags,
+                        MouseButton, Point, Region, WindowInfo)
 
 
 def test_displays_and_capture_metadata():
@@ -140,3 +140,37 @@ def test_stale_ref_raises_target_not_found():
     drv = FakeDriver()
     with pytest.raises(TargetNotFoundError):
         drv.window_perform("999:1", "raise", None)
+
+
+def test_install_launch_activate_terminate():
+    drv = FakeDriver()
+    drv.install_app("Notes", "com.apple.Notes")
+    drv.install_app("Safari", "com.apple.Safari")
+    notes = drv.launch_app("com.apple.Notes")
+    assert isinstance(notes, AppInfo) and notes.frontmost
+    safari = drv.launch_app("Safari")            # by name too
+    assert safari.frontmost
+    apps = {a.name: a for a in drv.running_apps()}
+    assert not apps["Notes"].frontmost
+    drv.activate_app(notes.pid)
+    apps = {a.name: a for a in drv.running_apps()}
+    assert apps["Notes"].frontmost
+    # Launching opened one window per app.
+    assert len(drv.list_windows(False)) == 2
+    drv.terminate_app(safari.pid, force=False)
+    assert len(drv.running_apps()) == 1
+    assert len(drv.list_windows(False)) == 1
+
+
+def test_launch_unknown_app():
+    drv = FakeDriver()
+    with pytest.raises(TargetNotFoundError):
+        drv.launch_app("com.example.Ghost")
+
+
+def test_activating_running_app_is_effectively_idempotent():
+    drv = FakeDriver()
+    drv.install_app("Notes", "com.apple.Notes")
+    a = drv.launch_app("Notes")
+    again = drv.launch_app("Notes")
+    assert again.pid == a.pid          # no second instance

@@ -6,8 +6,8 @@ from dataclasses import dataclass as _dataclass
 from PIL import Image
 
 from ..errors import InvalidArgsError, TargetNotFoundError
-from ..types import (ClipboardContent, DisplayInfo, ModifierFlags, Point,
-                    Region, WindowInfo)
+from ..types import (AppInfo, ClipboardContent, DisplayInfo, ModifierFlags,
+                    Point, Region, WindowInfo)
 from .base import MouseEventSpec, RawFrame, RawTextBox
 
 
@@ -52,6 +52,9 @@ class FakeDriver:
         self._secure_input = False
         self._windows: list[_FakeWindow] = []
         self._next_window_number = 1
+        self._installed: dict[str, str] = {}      # bundle_id -> name
+        self._running: dict[int, dict] = {}       # pid -> {name, bundle_id, frontmost}
+        self._next_pid = 1000
 
     # --- test helpers -----------------------------------------------------
     def fail_next(self, op: str, exc: Exception) -> None:
@@ -190,3 +193,60 @@ class FakeDriver:
         else:
             raise InvalidArgsError(f"unknown window action: {action}")
         self.events.append(("window", window_ref, action))
+
+    # --- app model -----------------------------------------------------
+    def install_app(self, name: str, bundle_id: str) -> None:
+        self._installed[bundle_id] = name
+
+    def _find_installed(self, ident: str) -> tuple[str, str] | None:
+        for bid, name in self._installed.items():
+            if ident in (bid, name):
+                return bid, name
+        return None
+
+    def running_apps(self) -> list[AppInfo]:
+        self._maybe_fail("running_apps")
+        return [AppInfo(r["bundle_id"], r["name"], pid, r["frontmost"])
+                for pid, r in self._running.items()]
+
+    def launch_app(self, ident: str) -> AppInfo:
+        self._maybe_fail("launch_app")
+        for pid, r in self._running.items():
+            if ident in (r["bundle_id"], r["name"]):
+                self.activate_app(pid)
+                return AppInfo(r["bundle_id"], r["name"], pid, True)
+        found = self._find_installed(ident)
+        if found is None:
+            raise TargetNotFoundError(
+                f"no such app: {ident}",
+                details={"installed": sorted(self._installed)})
+        bid, name = found
+        pid = self._next_pid
+        self._next_pid += 1
+        for r in self._running.values():
+            r["frontmost"] = False
+        self._running[pid] = {"name": name, "bundle_id": bid,
+                              "frontmost": True}
+        self.add_window(name, bid, pid, name,
+                        Region(50, 50, 1000, 700), focused=True)
+        self.events.append(("app", pid, "launch"))
+        return AppInfo(bid, name, pid, True)
+
+    def activate_app(self, pid: int) -> None:
+        self._maybe_fail("activate_app")
+        if pid not in self._running:
+            raise TargetNotFoundError(f"pid {pid} not running")
+        for p, r in self._running.items():
+            r["frontmost"] = (p == pid)
+        for w in self._windows:
+            w.focused = (w.pid == pid)
+        self.events.append(("app", pid, "activate"))
+
+    def terminate_app(self, pid: int, force: bool) -> None:
+        self._maybe_fail("terminate_app")
+        if pid not in self._running:
+            raise TargetNotFoundError(f"pid {pid} not running")
+        del self._running[pid]
+        self._windows = [w for w in self._windows if w.pid != pid]
+        self.events.append(
+            ("app", pid, "force_terminate" if force else "terminate"))
