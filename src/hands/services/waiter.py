@@ -21,14 +21,17 @@ class WaitResult:
 
 class Waiter:
     def __init__(self, screenshots: ScreenshotService, ocr: OCRService,
-                 config: HandsConfig) -> None:
+                 config: HandsConfig, driver=None) -> None:
         self._shots = screenshots
         self._ocr = ocr
         self._cfg = config.waiter
-        # M3 adds window_present / window_gone / app_frontmost here.
+        self._driver = driver
         self._checkers = {
             "text_present": self._text_present,
             "screen_stable": self._screen_stable,
+            "window_present": self._window_present,
+            "window_gone": self._window_gone,
+            "app_frontmost": self._app_frontmost,
         }
 
     async def wait_for(self, cond: dict, timeout_ms: int) -> WaitResult:
@@ -74,3 +77,27 @@ class Waiter:
         stable_ms = (now - scratch["since"]) * 1000
         return stable_ms >= quiet_ms, {"phash": shot.phash,
                                        "stable_ms": int(stable_ms)}
+
+    async def _window_present(self, cond: dict, scratch: dict):
+        wins = await anyio.to_thread.run_sync(self._driver.list_windows, True)
+        app = str(cond.get("app", "")).lower()
+        title = str(cond.get("title", "")).lower()
+        matches = [w for w in wins
+                   if (not app or app in (w.bundle_id or "").lower()
+                       or app in w.app_name.lower())
+                   and (not title or title in w.title.lower())]
+        evidence = {"windows": [{"window_ref": w.window_ref, "title": w.title,
+                                  "app": w.app_name} for w in matches]}
+        return bool(matches), evidence
+
+    async def _window_gone(self, cond: dict, scratch: dict):
+        met, evidence = await self._window_present(cond, scratch)
+        return not met, evidence
+
+    async def _app_frontmost(self, cond: dict, scratch: dict):
+        apps = await anyio.to_thread.run_sync(self._driver.running_apps)
+        needle = str(cond.get("app", "")).lower()
+        front = next((a for a in apps if a.frontmost), None)
+        met = front is not None and needle in (
+            (front.bundle_id or "").lower(), front.name.lower())
+        return met, {"frontmost": front.name if front else None}

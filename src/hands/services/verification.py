@@ -18,7 +18,7 @@ from .vision import crop, frame_diff
 _KNOWN_TYPES = frozenset({
     "text_present", "text_absent", "region_changed", "region_unchanged",
     "cursor_at", "all_of", "any_of",
-    # M3 extends: window_present, window_gone, clipboard_contains
+    "window_present", "window_gone", "clipboard_contains",
 })
 
 
@@ -51,11 +51,13 @@ class VerificationResult:
 
 class VerificationEngine:
     def __init__(self, screenshots: ScreenshotService, ocr: OCRService,
-                 driver: Driver, config: HandsConfig) -> None:
+                 driver: Driver, config: HandsConfig,
+                 clipboard=None) -> None:
         self._shots = screenshots
         self._ocr = ocr
         self._driver = driver
         self._cfg = config
+        self._clipboard = clipboard
         self._diff_threshold = config.verification.diff_threshold
 
     async def verify(self, expect: Expectation,
@@ -138,3 +140,33 @@ class VerificationEngine:
         return VerificationResult(
             hit, 1.0 if hit else 0.0,
             {"cursor": {"x": cur.x, "y": cur.y}})
+
+    async def _window_present(self, params, shot, baseline):
+        import anyio as _anyio
+        wins = await _anyio.to_thread.run_sync(
+            self._driver.list_windows, True)
+        title = str(params.get("title", "")).lower()
+        app = str(params.get("app", "")).lower()
+        matches = [w for w in wins
+                   if (not title or title in w.title.lower())
+                   and (not app or app in (w.bundle_id or "").lower()
+                        or app in w.app_name.lower())]
+        return VerificationResult(
+            bool(matches), 1.0 if matches else 0.0,
+            {"windows": [{"window_ref": w.window_ref, "title": w.title}
+                         for w in matches]})
+
+    async def _window_gone(self, params, shot, baseline):
+        inner = await self._window_present(params, shot, baseline)
+        return VerificationResult(not inner.passed,
+                                  1.0 - inner.confidence, inner.evidence)
+
+    async def _clipboard_contains(self, params, shot, baseline):
+        content = await self._clipboard.get("text")
+        text = content.text or ""
+        needle = str(params.get("text", ""))
+        matched = needle in text
+        # Redaction invariant: never surface clipboard content.
+        return VerificationResult(
+            matched, 1.0 if matched else 0.0,
+            {"matched": matched, "clipboard_len": len(text)})

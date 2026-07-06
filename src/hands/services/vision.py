@@ -32,7 +32,7 @@ def encode(image: Image.Image, fmt: str, jpeg_quality: int) -> bytes:
 def perceptual_hash(image: Image.Image) -> str:
     """64-bit average hash: grayscale 8x8, threshold at mean."""
     small = image.convert("L").resize((8, 8), Image.LANCZOS)
-    pixels = list(small.getdata())
+    pixels = small.tobytes()   # one byte per pixel for 8-bit grayscale
     mean = sum(pixels) / 64
     bits = 0
     for i, p in enumerate(pixels):

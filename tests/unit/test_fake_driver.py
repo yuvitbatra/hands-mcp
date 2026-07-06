@@ -1,6 +1,6 @@
 import pytest
 
-from hands.driver.base import MouseEventSpec, RawTextBox
+from hands.driver.base import AXNode, MouseEventSpec, OSPermissions, RawTextBox
 from hands.driver.fake import FakeDriver
 from hands.errors import DriverError, TargetNotFoundError
 from hands.types import (AppInfo, ClipboardContent, ModifierFlags,
@@ -174,3 +174,29 @@ def test_activating_running_app_is_effectively_idempotent():
     a = drv.launch_app("Notes")
     again = drv.launch_app("Notes")
     assert again.pid == a.pid          # no second instance
+
+
+def test_fake_ax_tree_reflects_windows():
+    drv = FakeDriver()
+    drv.install_app("Notes", "com.apple.Notes")
+    app = drv.launch_app("Notes")
+    tree = drv.ax_tree(app.pid, max_depth=8)
+    assert tree.role == "AXApplication"
+    assert tree.children[0].role == "AXWindow"
+    assert tree.children[0].title == "Notes"
+
+
+def test_fake_ax_tree_scripted_override():
+    drv = FakeDriver()
+    node = AXNode("AXApplication", "Fixture", None, None, (), (
+        AXNode("AXButton", "OK", None, Region(10, 10, 80, 30),
+               ("AXPress",)),))
+    drv.set_ax_tree(node)
+    assert drv.ax_tree(None, 8) is node
+
+
+def test_fake_permissions():
+    drv = FakeDriver()
+    assert drv.permissions() == OSPermissions(True, True)
+    drv.set_permissions(screen_recording=False)
+    assert drv.permissions().screen_recording is False

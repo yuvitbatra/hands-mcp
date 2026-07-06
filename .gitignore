@@ -11,3 +11,20 @@ wheels/
 
 # macOS
 .DS_Store
+
+# Test/tooling caches
+.pytest_cache/
+.benchmarks/
+
+# Unattended-run artifacts and session-handoff notes (dev-local, not part
+# of the shipped project — see PUBLISHING.md)
+AUTOPILOT_DONE.md
+IMPROVEMENTS.md
+autopilot.sh
+autopilot.log
+nohup.out
+continue.md
+PUBLISHING.md
+
+# uv/superpowers workspace scratch
+.superpowers/

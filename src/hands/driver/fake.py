@@ -8,7 +8,7 @@ from PIL import Image
 from ..errors import InvalidArgsError, TargetNotFoundError
 from ..types import (AppInfo, ClipboardContent, DisplayInfo, ModifierFlags,
                     Point, Region, WindowInfo)
-from .base import MouseEventSpec, RawFrame, RawTextBox
+from .base import AXNode, MouseEventSpec, OSPermissions, RawFrame, RawTextBox
 
 
 @_dataclass
@@ -55,6 +55,7 @@ class FakeDriver:
         self._installed: dict[str, str] = {}      # bundle_id -> name
         self._running: dict[int, dict] = {}       # pid -> {name, bundle_id, frontmost}
         self._next_pid = 1000
+        self._ax_override: AXNode | None = None
 
     # --- test helpers -----------------------------------------------------
     def fail_next(self, op: str, exc: Exception) -> None:
@@ -250,3 +251,37 @@ class FakeDriver:
         self._windows = [w for w in self._windows if w.pid != pid]
         self.events.append(
             ("app", pid, "force_terminate" if force else "terminate"))
+
+    # --- AX tree model ----------------------------------------------------
+    def set_ax_tree(self, node: AXNode) -> None:
+        self._ax_override = node
+
+    def ax_tree(self, pid: int | None, max_depth: int) -> AXNode:
+        self._maybe_fail("ax_tree")
+        if self._ax_override is not None:
+            return self._ax_override
+        if pid is None:
+            front = next((p for p, r in self._running.items()
+                          if r["frontmost"]), None)
+            if front is None:
+                raise TargetNotFoundError("no frontmost app")
+            pid = front
+        if pid not in self._running:
+            raise TargetNotFoundError(f"pid {pid} not running")
+        windows = tuple(
+            AXNode("AXWindow", w.title, None, w.bounds, ("AXRaise",))
+            for w in self._windows if w.pid == pid)
+        return AXNode("AXApplication", self._running[pid]["name"],
+                      None, None, (), windows)
+
+    # --- permissions (DESIGN §4.19) ----------------------------------------
+    def set_permissions(self, *, screen_recording: bool | None = None,
+                        accessibility: bool | None = None) -> None:
+        cur = getattr(self, "_permissions", OSPermissions(True, True))
+        self._permissions = OSPermissions(
+            cur.screen_recording if screen_recording is None
+            else screen_recording,
+            cur.accessibility if accessibility is None else accessibility)
+
+    def permissions(self) -> OSPermissions:
+        return getattr(self, "_permissions", OSPermissions(True, True))

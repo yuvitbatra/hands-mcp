@@ -52,3 +52,39 @@ async def test_screen_stable_on_static_screen(waiter):
 async def test_unknown_condition(waiter):
     with pytest.raises(InvalidArgsError):
         await waiter.wait_for({"type": "moon_phase"}, 100)
+
+
+@pytest.fixture
+def waiter_with_driver(fake_driver):
+    cfg = HandsConfig()
+    cfg.waiter.poll_start_ms = 5
+    state = StateManager(cfg)
+    shots = ScreenshotService(fake_driver, state, cfg)
+    ocr = OCRService(fake_driver, CoordinateMapper(fake_driver.displays()),
+                     cfg)
+    return Waiter(shots, ocr, cfg, driver=fake_driver), fake_driver
+
+
+async def test_window_present_and_gone(waiter_with_driver):
+    from hands.types import Region
+    waiter, fake_driver = waiter_with_driver
+    res = await waiter.wait_for(
+        {"type": "window_present", "app": "Notes"}, 40)
+    assert res.met is False
+    fake_driver.add_window("Notes", "com.apple.Notes", 7, "My Note",
+                           Region(0, 0, 400, 300))
+    res = await waiter.wait_for(
+        {"type": "window_present", "app": "Notes", "title": "note"}, 500)
+    assert res.met
+    res = await waiter.wait_for(
+        {"type": "window_gone", "title": "My Note"}, 40)
+    assert res.met is False
+
+
+async def test_app_frontmost(waiter_with_driver):
+    waiter, fake_driver = waiter_with_driver
+    fake_driver.install_app("Notes", "com.apple.Notes")
+    fake_driver.launch_app("Notes")
+    res = await waiter.wait_for(
+        {"type": "app_frontmost", "app": "com.apple.Notes"}, 500)
+    assert res.met

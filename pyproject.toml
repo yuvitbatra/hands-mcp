@@ -1,9 +1,22 @@
 [project]
-name = "hands"
+name = "hands-mcp"
 version = "0.1.0"
 description = "macOS computer-use MCP server for autonomous AI agents"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "yuvitbatra", email = "yuvitbatra@gmail.com" }]
+keywords = ["mcp", "computer-use", "macos", "automation", "ai", "agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Operating System",
+]
 dependencies = [
     "mcp>=1.2",
     "pydantic>=2.7",
@@ -13,11 +26,19 @@ dependencies = [
     "structlog>=24.1",
 ]
 
+[project.urls]
+# Fill in with your actual GitHub URL before publishing — see PUBLISHING.md.
+Homepage = "https://github.com/yuvitbatra/hands-mcp"
+Repository = "https://github.com/yuvitbatra/hands-mcp"
+Issues = "https://github.com/yuvitbatra/hands-mcp/issues"
+
 [project.optional-dependencies]
 macos = [
     "pyobjc-framework-Quartz>=10.2; sys_platform == 'darwin'",
     "pyobjc-framework-Vision>=10.2; sys_platform == 'darwin'",
     "pyobjc-framework-ScreenCaptureKit>=10.2; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.2; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10.2; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
@@ -26,6 +47,8 @@ hands = "hands.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8.2",
+    "pytest-benchmark>=5.2.3",
+    "anyio[trio]>=4.4",
 ]
 
 [build-system]
@@ -37,3 +60,8 @@ packages = ["src/hands"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "perf: performance benchmarks (opt-in: -m perf)",
+    "stress: soak/stress tests (opt-in: -m stress)",
+]
+addopts = "-m 'not perf and not stress'"

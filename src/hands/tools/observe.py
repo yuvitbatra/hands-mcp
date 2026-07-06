@@ -40,9 +40,12 @@ class WaitArgs(BaseModel, extra="forbid"):
 
     @model_validator(mode="after")
     def _exactly_one(self):
-        if (self.condition is None) == (self.duration_ms is None):
+        if self.condition is None and self.duration_ms is None:
             raise ValueError(
-                "provide exactly one of `condition` or `duration_ms`")
+                "provide either `condition` or `duration_ms`")
+        if self.condition is not None and self.duration_ms is not None:
+            raise ValueError(
+                "provide only one of `condition` or `duration_ms`, not both")
         return self
 
 
@@ -164,8 +167,11 @@ def register(registry: ToolRegistry, container) -> None:
         "verify",
         "Check an expected outcome after acting. expect = {type: "
         "'text_present'|'text_absent'|'region_changed'|'region_unchanged'"
-        "|'cursor_at'|'all_of'|'any_of', ...params, children?}. "
+        "|'cursor_at'|'window_present'|'window_gone'|'clipboard_contains'"
+        "|'all_of'|'any_of', ...params, children?}. "
         "region_changed/unchanged need baseline_screenshot_id from an "
         "earlier screenshot response. `text_present`/`text_absent` "
-        "require an exact (case-insensitive) substring match, not fuzzy.",
+        "require an exact (case-insensitive) substring match, not fuzzy. "
+        "clipboard_contains never returns clipboard content, only "
+        "matched/clipboard_len.",
         VerifyArgs, verify, "read", RetryPolicy.read(), idempotent=True))

@@ -41,6 +41,25 @@ class RawTextBox:
     confidence: float
 
 
+@dataclass(frozen=True, slots=True)
+class AXNode:
+    """One accessibility element (DESIGN §5.15). region is canonical
+    points; None when the element has no frame."""
+    role: str
+    title: str | None
+    value: str | None
+    region: Region | None
+    actions: tuple[str, ...] = ()
+    children: tuple["AXNode", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class OSPermissions:
+    """TCC grant status (DESIGN §4.19)."""
+    screen_recording: bool
+    accessibility: bool
+
+
 @runtime_checkable
 class Driver(Protocol):
     def capture(self, region: Region | None,
@@ -65,3 +84,5 @@ class Driver(Protocol):
     def launch_app(self, ident: str) -> AppInfo: ...
     def activate_app(self, pid: int) -> None: ...
     def terminate_app(self, pid: int, force: bool) -> None: ...
+    def ax_tree(self, pid: int | None, max_depth: int) -> AXNode: ...
+    def permissions(self) -> OSPermissions: ...

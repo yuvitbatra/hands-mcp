@@ -56,9 +56,25 @@ class ClipboardConfig(BaseModel):
 class SecurityConfig(BaseModel):
     kill_switch_path: Path = Path.home() / ".hands" / "KILL"
     audit_path: Path = Path.home() / ".hands" / "audit.jsonl"
+    plugin_allowlist: list[str] | None = None
+    profile: Literal["strict", "default", "trusted"] = "default"
+    max_actions_per_s: float = 10.0
+    deny_apps: list[str] = [
+        "com.apple.systempreferences*",
+        "com.apple.Passwords*",
+        "com.apple.keychainaccess",
+        "com.agilebits.onepassword*",
+        "com.1password.*",
+    ]
+    secret_patterns: list[str] = []
+    confirmation: Literal["dialog", "deny"] = "dialog"
 
     def kill_switch_engaged(self) -> bool:
         return self.kill_switch_path.exists()
+
+
+class AXConfig(BaseModel):
+    max_nodes: int = 500
 
 
 class HandsConfig(BaseSettings):
@@ -72,10 +88,12 @@ class HandsConfig(BaseSettings):
     observe: ObserveConfig = ObserveConfig()
     state: StateConfig = StateConfig()
     security: SecurityConfig = SecurityConfig()
+    plugins: dict[str, dict] = {}
     ocr: OCRConfig = OCRConfig()
     waiter: WaiterConfig = WaiterConfig()
     verification: VerificationConfig = VerificationConfig()
     clipboard: ClipboardConfig = ClipboardConfig()
+    ax: AXConfig = AXConfig()
 
 
 def load_config() -> HandsConfig:

@@ -117,3 +117,43 @@ async def test_all_of_collects_failed_clauses(env):
                      {"type": "text_present", "text": "Missing"}]}))
     assert not res.passed
     assert "text_present" in res.failed_clauses
+
+
+@pytest.fixture
+def env_with_clipboard(fake_driver):
+    from hands.services.clipboard import ClipboardService
+    from hands.services.keyboard import KeyboardService
+    cfg = HandsConfig()
+    state = StateManager(cfg)
+    shots = ScreenshotService(fake_driver, state, cfg)
+    ocr = OCRService(fake_driver, CoordinateMapper(fake_driver.displays()),
+                     cfg)
+    keyboard = KeyboardService(fake_driver, cfg)
+    clipboard = ClipboardService(fake_driver, keyboard, cfg)
+    engine = VerificationEngine(shots, ocr, fake_driver, cfg,
+                                clipboard=clipboard)
+    return fake_driver, shots, engine
+
+
+async def test_window_present_strategy(env_with_clipboard):
+    driver, _, engine = env_with_clipboard
+    from hands.types import Region
+    driver.add_window("Notes", "com.apple.Notes", 7, "My Note",
+                      Region(0, 0, 400, 300))
+    res = await engine.verify(Expectation.from_wire(
+        {"type": "window_present", "title": "My Note"}))
+    assert res.passed and res.confidence == 1.0
+    gone = await engine.verify(Expectation.from_wire(
+        {"type": "window_gone", "title": "My Note"}))
+    assert not gone.passed
+
+
+async def test_clipboard_contains_redacts_evidence(env_with_clipboard):
+    driver, _, engine = env_with_clipboard
+    from hands.types import ClipboardContent
+    driver.clipboard_write(ClipboardContent("text", text="secret token"))
+    res = await engine.verify(Expectation.from_wire(
+        {"type": "clipboard_contains", "text": "token"}))
+    assert res.passed
+    assert "secret" not in str(res.evidence)
+    assert res.evidence["clipboard_len"] == len("secret token")

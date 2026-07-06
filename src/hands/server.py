@@ -41,11 +41,15 @@ def build_server(container: Container) -> Server:
 
 async def run_server(config: HandsConfig) -> None:
     container = Container.build(config)
+    container.plugins.discover_and_load(
+        config.security.plugin_allowlist)
     server = build_server(container)
     try:
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream,
                              server.create_initialization_options())
     finally:
+        container.plugins.teardown_all()
         # A crash mid-hotkey must not leave cmd held down (DESIGN §2.6).
         container.keyboard.release_all()
+        container.audit.close()

@@ -48,6 +48,15 @@ class AuditLogger:
     def flush(self) -> None:
         self._fh.flush()
 
+    def close(self) -> None:
+        self._fh.close()
+
+    def __del__(self) -> None:
+        try:
+            self._fh.close()
+        except Exception:
+            pass
+
     @staticmethod
     def verify_chain(path: Path) -> tuple[bool, int | None]:
         prev = ""

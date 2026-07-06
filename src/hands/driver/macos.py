@@ -15,15 +15,23 @@ import Quartz
 import structlog
 from PIL import Image
 
-from ..errors import DriverError, PermissionMissingError
+from ..errors import (
+    DriverError,
+    InvalidArgsError,
+    PermissionMissingError,
+    TargetNotFoundError,
+)
 from ..types import (
+    AppInfo,
+    ClipboardContent,
     DisplayInfo,
     ModifierFlags,
     MouseButton,
     Point,
     Region,
+    WindowInfo,
 )
-from .base import MouseEventSpec, RawFrame, RawTextBox
+from .base import AXNode, MouseEventSpec, OSPermissions, RawFrame, RawTextBox
 
 log = structlog.get_logger(__name__)
 
@@ -282,3 +290,253 @@ class MacOSDriver:
         if mask and down:
             Quartz.CGEventSetFlags(cg, mask)
         Quartz.CGEventPost(Quartz.kCGHIDEventTap, cg)
+
+    # --- clipboard (DESIGN §4.7) -----------------------------------------
+    def clipboard_read(self) -> ClipboardContent:
+        from AppKit import (
+            NSPasteboard,
+            NSPasteboardTypePNG,
+            NSPasteboardTypeString,
+        )
+        pb = NSPasteboard.generalPasteboard()
+        text = pb.stringForType_(NSPasteboardTypeString)
+        if text is not None:
+            return ClipboardContent("text", text=str(text))
+        data = pb.dataForType_(NSPasteboardTypePNG)
+        if data is not None:
+            return ClipboardContent("image", image_png=bytes(data))
+        return ClipboardContent("empty")
+
+    def clipboard_write(self, content: ClipboardContent) -> None:
+        from AppKit import (
+            NSData,
+            NSPasteboard,
+            NSPasteboardTypePNG,
+            NSPasteboardTypeString,
+        )
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        if content.kind == "text" and content.text is not None:
+            pb.setString_forType_(content.text, NSPasteboardTypeString)
+        elif content.kind == "image" and content.image_png is not None:
+            pb.setData_forType_(
+                NSData.dataWithBytes_length_(content.image_png,
+                                             len(content.image_png)),
+                NSPasteboardTypePNG)
+
+    def secure_input_active(self) -> bool:
+        import ctypes
+        carbon = ctypes.CDLL(
+            "/System/Library/Frameworks/Carbon.framework/Carbon")
+        return bool(carbon.IsSecureEventInputEnabled())
+
+    # --- windows (DESIGN §4.8) -------------------------------------------
+    def list_windows(self, on_screen_only: bool) -> list[WindowInfo]:
+        from Quartz import (
+            CGWindowListCopyWindowInfo,
+            kCGNullWindowID,
+            kCGWindowListExcludeDesktopElements,
+            kCGWindowListOptionAll,
+            kCGWindowListOptionOnScreenOnly,
+        )
+        opts = kCGWindowListExcludeDesktopElements
+        opts |= (kCGWindowListOptionOnScreenOnly if on_screen_only
+                 else kCGWindowListOptionAll)
+        raw = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) or []
+        apps = {a.pid: a for a in self.running_apps()}
+        front_pid = next((a.pid for a in apps.values() if a.frontmost),
+                         None)
+        out: list[WindowInfo] = []
+        for w in raw:
+            if w.get("kCGWindowLayer", 0) != 0:
+                continue                    # skip menubar/dock layers
+            pid = int(w["kCGWindowOwnerPID"])
+            b = w["kCGWindowBounds"]
+            app = apps.get(pid)
+            out.append(WindowInfo(
+                window_ref=f"{pid}:{int(w['kCGWindowNumber'])}",
+                app_name=str(w.get("kCGWindowOwnerName", "")),
+                bundle_id=app.bundle_id if app else None,
+                pid=pid,
+                title=str(w.get("kCGWindowName", "") or ""),
+                bounds=Region(float(b["X"]), float(b["Y"]),
+                              float(b["Width"]), float(b["Height"])),
+                focused=(pid == front_pid),
+                minimized=not w.get("kCGWindowIsOnscreen", True)))
+        return out
+
+    def _ax_window_for_ref(self, window_ref: str):
+        """Resolve 'pid:number' to an AXUIElement window by title+bounds
+        proximity (AX has no CGWindowNumber bridge; DESIGN §4.8)."""
+        import ApplicationServices as AS
+        pid = int(window_ref.split(":")[0])
+        target = next((w for w in self.list_windows(False)
+                       if w.window_ref == window_ref), None)
+        if target is None:
+            raise TargetNotFoundError(f"window {window_ref} not found")
+        app_el = AS.AXUIElementCreateApplication(pid)
+        err, windows = AS.AXUIElementCopyAttributeValue(
+            app_el, AS.kAXWindowsAttribute, None)
+        if err != 0 or not windows:
+            raise TargetNotFoundError(
+                f"no AX windows for pid {pid}",
+                details={"ax_error": int(err)})
+        for el in windows:
+            _, title = AS.AXUIElementCopyAttributeValue(
+                el, AS.kAXTitleAttribute, None)
+            if str(title or "") == target.title:
+                return el, target
+        return windows[0], target        # single-window fallback
+
+    def window_perform(self, window_ref: str, action: str,
+                       bounds: Region | None) -> None:
+        import ApplicationServices as AS
+        import Quartz
+        el, info = self._ax_window_for_ref(window_ref)
+        if action in ("move", "resize", "maximize"):
+            if action == "maximize":
+                bounds = self.displays()[0].bounds_pt
+            if action in ("move", "maximize"):
+                point = Quartz.CGPoint(bounds.x, bounds.y)
+                value = AS.AXValueCreate(AS.kAXValueCGPointType, point)
+                AS.AXUIElementSetAttributeValue(
+                    el, AS.kAXPositionAttribute, value)
+            if action in ("resize", "maximize"):
+                size = Quartz.CGSize(bounds.width, bounds.height)
+                value = AS.AXValueCreate(AS.kAXValueCGSizeType, size)
+                AS.AXUIElementSetAttributeValue(
+                    el, AS.kAXSizeAttribute, value)
+        elif action in ("minimize", "unminimize"):
+            AS.AXUIElementSetAttributeValue(
+                el, AS.kAXMinimizedAttribute,
+                action == "minimize")
+        elif action == "raise":
+            self.activate_app(info.pid)
+            AS.AXUIElementPerformAction(el, AS.kAXRaiseAction)
+        elif action == "close":
+            err, button = AS.AXUIElementCopyAttributeValue(
+                el, AS.kAXCloseButtonAttribute, None)
+            if err != 0 or button is None:
+                raise DriverError(f"window {window_ref} has no close "
+                                  f"button (ax_error={int(err)})")
+            AS.AXUIElementPerformAction(button, AS.kAXPressAction)
+        else:
+            raise InvalidArgsError(f"unknown window action: {action}")
+
+    # --- apps (DESIGN §4.9) ------------------------------------------------
+    def running_apps(self) -> list[AppInfo]:
+        from AppKit import NSWorkspace
+        ws = NSWorkspace.sharedWorkspace()
+        front = ws.frontmostApplication()
+        out = []
+        for a in ws.runningApplications():
+            if a.activationPolicy() != 0:      # regular apps only
+                continue
+            out.append(AppInfo(
+                bundle_id=str(a.bundleIdentifier() or "") or None,
+                name=str(a.localizedName() or ""),
+                pid=int(a.processIdentifier()),
+                frontmost=(front is not None
+                           and a.processIdentifier()
+                           == front.processIdentifier())))
+        return out
+
+    def launch_app(self, ident: str) -> AppInfo:
+        import subprocess
+        import time
+        for a in self.running_apps():
+            if ident in ((a.bundle_id or ""), a.name):
+                self.activate_app(a.pid)
+                return AppInfo(a.bundle_id, a.name, a.pid, True)
+        flag = "-b" if "." in ident else "-a"
+        proc = subprocess.run(["/usr/bin/open", flag, ident],
+                              capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise TargetNotFoundError(
+                f"cannot launch {ident}: {proc.stderr.strip()}")
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            for a in self.running_apps():
+                if ident in ((a.bundle_id or ""), a.name):
+                    return a
+            time.sleep(0.2)
+        raise DriverError(f"{ident} did not appear in running apps")
+
+    def activate_app(self, pid: int) -> None:
+        from AppKit import (
+            NSApplicationActivateIgnoringOtherApps,
+            NSRunningApplication,
+        )
+        app = NSRunningApplication.\
+            runningApplicationWithProcessIdentifier_(pid)
+        if app is None:
+            raise TargetNotFoundError(f"pid {pid} not running")
+        app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+
+    def terminate_app(self, pid: int, force: bool) -> None:
+        from AppKit import NSRunningApplication
+        app = NSRunningApplication.\
+            runningApplicationWithProcessIdentifier_(pid)
+        if app is None:
+            raise TargetNotFoundError(f"pid {pid} not running")
+        if force:
+            app.forceTerminate()
+        else:
+            app.terminate()
+
+    # --- AX tree (DESIGN §5.15) --------------------------------------------
+    def ax_tree(self, pid: int | None, max_depth: int) -> AXNode:
+        import ApplicationServices as AS
+        if not AS.AXIsProcessTrusted():
+            raise PermissionMissingError(
+                "Accessibility permission missing",
+                remediation="x-apple.systempreferences:com.apple."
+                            "preference.security?Privacy_Accessibility")
+        if pid is None:
+            front = next((a for a in self.running_apps()
+                          if a.frontmost), None)
+            if front is None:
+                raise TargetNotFoundError("no frontmost app")
+            pid = front.pid
+        root = AS.AXUIElementCreateApplication(pid)
+
+        def attr(el, name):
+            err, value = AS.AXUIElementCopyAttributeValue(el, name, None)
+            return value if err == 0 else None
+
+        def walk(el, depth: int) -> AXNode:
+            role = str(attr(el, AS.kAXRoleAttribute) or "AXUnknown")
+            title = attr(el, AS.kAXTitleAttribute)
+            value = attr(el, AS.kAXValueAttribute)
+            region = None
+            pos = attr(el, AS.kAXPositionAttribute)
+            size = attr(el, AS.kAXSizeAttribute)
+            if pos is not None and size is not None:
+                ok_p, point = AS.AXValueGetValue(
+                    pos, AS.kAXValueCGPointType, None)
+                ok_s, sz = AS.AXValueGetValue(
+                    size, AS.kAXValueCGSizeType, None)
+                if ok_p and ok_s:
+                    region = Region(point.x, point.y,
+                                    sz.width, sz.height)
+            err, actions = AS.AXUIElementCopyActionNames(el, None)
+            children: tuple[AXNode, ...] = ()
+            if depth > 1:
+                kids = attr(el, AS.kAXChildrenAttribute) or []
+                children = tuple(walk(k, depth - 1) for k in kids)
+            return AXNode(role,
+                          str(title) if title is not None else None,
+                          str(value) if value is not None else None,
+                          region,
+                          tuple(str(a) for a in (actions or [])),
+                          children)
+
+        return walk(root, max_depth)
+
+    # --- TCC (DESIGN §4.19) --------------------------------------------------
+    def permissions(self) -> OSPermissions:
+        import ApplicationServices as AS
+        from Quartz import CGPreflightScreenCaptureAccess
+        return OSPermissions(
+            screen_recording=bool(CGPreflightScreenCaptureAccess()),
+            accessibility=bool(AS.AXIsProcessTrusted()))

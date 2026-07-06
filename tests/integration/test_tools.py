@@ -29,7 +29,8 @@ EXPECTED_TOOLS = {"screenshot", "get_state", "wait", "mouse_move",
                   "keyboard_type", "key_press", "find_text", "verify",
                   "clipboard_get", "clipboard_set", "clipboard_paste",
                   "window_list", "window_focus", "window_manage",
-                  "app_open", "app_close", "app_list"}
+                  "app_open", "app_close", "app_list",
+                  "get_ui_tree", "execute_sequence"}
 
 
 @pytest.fixture
@@ -45,20 +46,26 @@ def wired(fake_driver, tmp_path):
     ocr = OCRService(fake_driver, coords, cfg)
     keyboard = KeyboardService(fake_driver, cfg)
     waiter = Waiter(shots, ocr, cfg)
+    permissions = AllowAllPermissions()
+    clipboard = ClipboardService(fake_driver, keyboard, cfg)
     container = SimpleNamespace(
         config=cfg, driver=fake_driver, state=state,
         mouse=MouseService(fake_driver, coords, state, cfg),
         keyboard=keyboard,
-        clipboard=ClipboardService(fake_driver, keyboard, cfg),
+        clipboard=clipboard,
         windows=WindowService(fake_driver),
         apps=AppService(fake_driver, waiter),
         screenshots=shots, ocr=ocr,
         waiter=waiter,
-        verification=VerificationEngine(shots, ocr, fake_driver, cfg))
+        permissions=permissions,
+        verification=VerificationEngine(shots, ocr, fake_driver, cfg,
+                                        clipboard=clipboard))
     reg = ToolRegistry()
-    register_builtin_tools(reg, container)
-    disp = Dispatcher(reg, AllowAllPermissions(), state,
+    disp = Dispatcher(reg, permissions, state,
                       AuditLogger(cfg), Metrics(), cfg)
+    container.dispatcher = disp
+    container.registry = reg
+    register_builtin_tools(reg, container)
     return disp, reg, fake_driver
 
 
